@@ -2,11 +2,6 @@ import type { Hooks, PluginInput } from "@opencode-ai/plugin"
 import { loadConfig, parseModel } from "./config"
 import { createLogger } from "./log"
 
-interface SessionState {
-  fallbackActive: boolean
-  cooldownEndTime: number
-}
-
 interface MessageInfo {
   id: string
   role: "user" | "assistant"
@@ -33,7 +28,7 @@ interface MessageWithParts {
   parts: MessagePart[]
 }
 
-const sessionStates = new Map<string, SessionState>()
+const sessionIndex = new Map<string, number>()
 
 function createPatternMatcher(patterns: string[]) {
   return (message: string): boolean => {
@@ -46,13 +41,12 @@ export async function createPlugin(context: PluginInput): Promise<Hooks> {
   const config = loadConfig()
   const logger = createLogger(config.logging)
   const isRateLimitMessage = createPatternMatcher(config.patterns)
-  const fallbackModel = parseModel(config.fallbackModel)
+  const fallbackModels = config.fallbackModels.map(parseModel)
 
   await logger.info("Plugin initialized", {
     enabled: config.enabled,
-    fallbackModel: config.fallbackModel,
+    fallbackModels: config.fallbackModels,
     patterns: config.patterns,
-    cooldownMs: config.cooldownMs,
   })
 
   if (!config.enabled) {
@@ -76,25 +70,22 @@ export async function createPlugin(context: PluginInput): Promise<Hooks> {
         if (props.status.type === "retry" && props.status.message) {
           if (isRateLimitMessage(props.status.message)) {
             const sessionID = props.sessionID
-            const existingState = sessionStates.get(sessionID)
+            const currentIndex = sessionIndex.get(sessionID) ?? -1
+            const nextIndex = currentIndex + 1
 
-            if (existingState?.fallbackActive && Date.now() < existingState.cooldownEndTime) {
-              await logger.info("Skipping fallback, cooldown active", {
-                sessionID,
-                cooldownRemaining: existingState.cooldownEndTime - Date.now(),
-              })
+            if (nextIndex >= fallbackModels.length) {
+              await logger.info("All fallbacks exhausted, no more models to try", { sessionID })
               return
             }
 
-            await logger.info("Rate limit detected, switching to fallback", {
+            const model = fallbackModels[nextIndex]
+
+            await logger.info("Rate limit detected, switching to next fallback", {
               sessionID,
               message: props.status.message,
-              fallbackModel: config.fallbackModel,
-            })
-
-            sessionStates.set(sessionID, {
-              fallbackActive: true,
-              cooldownEndTime: Date.now() + config.cooldownMs,
+              fromIndex: currentIndex,
+              toIndex: nextIndex,
+              model: config.fallbackModels[nextIndex],
             })
 
             try {
@@ -147,19 +138,21 @@ export async function createPlugin(context: PluginInput): Promise<Hooks> {
 
               await logger.info("Sending prompt with fallback model", {
                 sessionID,
-                model: fallbackModel,
+                model,
+                index: nextIndex,
                 partsCount: originalParts.length,
               })
               await context.client.session.prompt({
                 path: { id: sessionID },
                 body: {
-                  model: fallbackModel,
+                  model,
                   agent: lastUserMessage.info.agent,
                   parts: originalParts,
                 },
               })
 
-              await logger.info("Fallback prompt sent successfully", { sessionID })
+              sessionIndex.set(sessionID, nextIndex)
+              await logger.info("Fallback prompt sent successfully", { sessionID, index: nextIndex })
             } catch (err) {
               await logger.error("Failed to send fallback prompt", {
                 sessionID,
@@ -168,21 +161,12 @@ export async function createPlugin(context: PluginInput): Promise<Hooks> {
             }
           }
         }
-
-        if (props.status.type === "idle") {
-          const sessionID = props.sessionID
-          const state = sessionStates.get(sessionID)
-          if (state && state.fallbackActive && Date.now() >= state.cooldownEndTime) {
-            state.fallbackActive = false
-            await logger.info("Cooldown expired, fallback reset", { sessionID })
-          }
-        }
       }
 
       if (event.type === "session.deleted") {
         const props = event.properties as { info?: { id?: string } }
         if (props.info?.id) {
-          sessionStates.delete(props.info.id)
+          sessionIndex.delete(props.info.id)
           await logger.info("Session cleaned up", { sessionID: props.info.id })
         }
       }

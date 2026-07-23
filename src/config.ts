@@ -11,7 +11,7 @@ export type FallbackModel = string | FallbackModelObject
 
 export interface RateLimitFallbackConfig {
   enabled: boolean
-  fallbackModel: FallbackModel
+  fallbackModels: FallbackModel[]
   cooldownMs: number
   patterns: string[]
   logging: boolean
@@ -19,7 +19,7 @@ export interface RateLimitFallbackConfig {
 
 interface RawConfig {
   enabled?: boolean
-  fallbackModel?: FallbackModel
+  fallbackModels?: FallbackModel[]
   cooldownMs?: number
   patterns?: string[]
   logging?: boolean
@@ -35,7 +35,7 @@ const DEFAULT_PATTERNS = [
 
 const DEFAULT_CONFIG: RateLimitFallbackConfig = {
   enabled: true,
-  fallbackModel: "anthropic/claude-opus-4-5",
+  fallbackModels: ["anthropic/claude-opus-4-5"],
   cooldownMs: 300000,
   patterns: DEFAULT_PATTERNS,
   logging: false,
@@ -98,7 +98,7 @@ export function loadConfig(): RateLimitFallbackConfig {
 
     return {
       enabled: userConfig.enabled ?? DEFAULT_CONFIG.enabled,
-      fallbackModel: userConfig.fallbackModel ?? DEFAULT_CONFIG.fallbackModel,
+      fallbackModels: userConfig.fallbackModels ?? DEFAULT_CONFIG.fallbackModels,
       cooldownMs: userConfig.cooldownMs ?? DEFAULT_CONFIG.cooldownMs,
       patterns: userConfig.patterns ?? DEFAULT_CONFIG.patterns,
       logging: userConfig.logging ?? DEFAULT_CONFIG.logging,
