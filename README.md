@@ -1,4 +1,4 @@
-# opencode-rate-limit-fallback
+# opencode-rate-limit-fallback-multi
 
 OpenCode plugin that automatically switches to a fallback model when rate limits are hit.
 
@@ -8,7 +8,7 @@ Add to your `opencode.jsonc`:
 
 ```json
 {
-  "plugin": ["opencode-rate-limit-fallback"]
+  "plugin": ["opencode-rate-limit-fallback-multi"]
 }
 ```
 
@@ -56,6 +56,16 @@ Create `rate-limit-fallback.json` in your OpenCode config directory:
 ```json
 {
   "fallbackModel": "anthropic/claude-opus-4-5"
+}
+```
+
+**Object format:**
+```json
+{
+  "fallbackModel": {
+    "providerID": "anthropic",
+    "modelID": "claude-opus-4-5"
+  }
 }
 ```
 
@@ -109,7 +119,7 @@ For local development, use a `file://` URL in your config:
 ```json
 {
   "plugin": [
-    "file:///path/to/opencode-rate-limit-fallback/index.ts"
+    "file:///path/to/opencode-rate-limit-fallback-multi/index.ts"
   ]
 }
 ```
