@@ -35,7 +35,7 @@ const DEFAULT_PATTERNS = [
 
 const DEFAULT_CONFIG: RateLimitFallbackConfig = {
   enabled: true,
-  fallbackModels: ["anthropic/claude-opus-4-5"],
+  fallbackModels: [],
   cooldownMs: 300000,
   patterns: DEFAULT_PATTERNS,
   logging: false,
