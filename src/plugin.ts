@@ -80,6 +80,8 @@ export async function createPlugin(context: PluginInput): Promise<Hooks> {
 
             const model = fallbackModels[nextIndex]
 
+            sessionIndex.set(sessionID, nextIndex)
+
             await logger.info("Rate limit detected, switching to next fallback", {
               sessionID,
               message: props.status.message,
@@ -150,8 +152,6 @@ export async function createPlugin(context: PluginInput): Promise<Hooks> {
                   parts: originalParts,
                 },
               })
-
-              sessionIndex.set(sessionID, nextIndex)
               await logger.info("Fallback prompt sent successfully", { sessionID, index: nextIndex })
             } catch (err) {
               await logger.error("Failed to send fallback prompt", {
