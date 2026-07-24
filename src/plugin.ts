@@ -28,7 +28,7 @@ interface MessageWithParts {
   parts: MessagePart[]
 }
 
-const sessionIndex = new Map<string, number>()
+const sessionHistory = new Map<string, number[]>()
 
 function createPatternMatcher(patterns: string[]) {
   return (message: string): boolean => {
@@ -70,7 +70,8 @@ export async function createPlugin(context: PluginInput): Promise<Hooks> {
         if (props.status.type === "retry" && props.status.message) {
           if (isRateLimitMessage(props.status.message)) {
             const sessionID = props.sessionID
-            const currentIndex = sessionIndex.get(sessionID) ?? -1
+            const history = sessionHistory.get(sessionID) ?? []
+            const currentIndex = history.length > 0 ? history[history.length - 1] : -1
             const nextIndex = currentIndex + 1
 
             if (nextIndex >= fallbackModels.length) {
@@ -80,7 +81,8 @@ export async function createPlugin(context: PluginInput): Promise<Hooks> {
 
             const model = fallbackModels[nextIndex]
 
-            sessionIndex.set(sessionID, nextIndex)
+            history.push(nextIndex)
+            sessionHistory.set(sessionID, history)
 
             await logger.info("Rate limit detected, switching to next fallback", {
               sessionID,
@@ -153,6 +155,28 @@ export async function createPlugin(context: PluginInput): Promise<Hooks> {
                 },
               })
               await logger.info("Fallback prompt sent successfully", { sessionID, index: nextIndex })
+
+              // Multi-channel notification
+              try {
+                await context.client.tui.showToast({
+                  body: {
+                    message: `Rate limit hit — switched to ${config.fallbackModels[nextIndex]}`,
+                    variant: "error",
+                  },
+                })
+              } catch {}
+
+              try {
+                await context.client.app.log({
+                  body: {
+                    service: "rate-limit-fallback",
+                    level: "warn",
+                    message: `Rate limit detected — switched to ${config.fallbackModels[nextIndex]}`,
+                    extra: { sessionID, fromIndex: currentIndex, toIndex: nextIndex },
+                  },
+                })
+              } catch {}
+
             } catch (err) {
               await logger.error("Failed to send fallback prompt", {
                 sessionID,
@@ -166,9 +190,17 @@ export async function createPlugin(context: PluginInput): Promise<Hooks> {
       if (event.type === "session.deleted") {
         const props = event.properties as { info?: { id?: string } }
         if (props.info?.id) {
-          sessionIndex.delete(props.info.id)
+          sessionHistory.delete(props.info.id)
           await logger.info("Session cleaned up", { sessionID: props.info.id })
         }
+      }
+    },
+    "experimental.text.complete": async (input, output) => {
+      const history = sessionHistory.get(input.sessionID)
+      if (history && history.length > 0) {
+        const lines = history.map(i => `[← Rate limit hit: switched to ${config.fallbackModels[i]}]`)
+        output.text = lines.join("\n") + "\n" + output.text
+        sessionHistory.delete(input.sessionID)
       }
     },
   }
