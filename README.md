@@ -14,13 +14,15 @@ Add to your `opencode.jsonc`:
 
 ## Configuration
 
-Create `rate-limit-fallback.json` in your OpenCode config directory:
+Create `rate-limit-fallback-multi.json` in your OpenCode config directory:
 
-**Locations checked (in order):**
-1. `~/.config/opencode/rate-limit-fallback.json`
-2. `~/.config/opencode/config/rate-limit-fallback.json`
-3. `~/.config/opencode/plugins/rate-limit-fallback.json`
-4. `~/.config/opencode/plugin/rate-limit-fallback.json`
+**Recommended location (checked first):**
+1. `~/.config/opencode/rate-limit-fallback-multi.json`
+
+**Alternative locations (checked in order):**
+1. `~/.config/opencode/config/rate-limit-fallback-multi.json`
+2. `~/.config/opencode/plugins/rate-limit-fallback-multi.json`
+3. `~/.config/opencode/plugin/rate-limit-fallback-multi.json`
 
 **Example config:**
 
@@ -48,7 +50,7 @@ Create `rate-limit-fallback.json` in your OpenCode config directory:
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `enabled` | boolean | `true` | Enable/disable the plugin |
-| `fallbackModels` | array | `["anthropic/claude-opus-4-5"]` | Ordered list of fallback models |
+| `fallbackModels` | array | `[]` | Ordered list of fallback models |
 | `patterns` | string[] | (see below) | Custom rate limit detection patterns |
 | `logging` | boolean | `false` | Enable file-based logging |
 

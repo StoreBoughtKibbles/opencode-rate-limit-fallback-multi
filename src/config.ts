@@ -41,7 +41,7 @@ const DEFAULT_CONFIG: RateLimitFallbackConfig = {
   logging: false,
 }
 
-const CONFIG_FILENAME = "rate-limit-fallback.json"
+const CONFIG_FILENAME = "rate-limit-fallback-multi.json"
 const SEARCH_SUBDIRS = ["config", "plugins", "plugin"]
 
 function getConfigDir(): string {
