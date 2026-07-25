@@ -29,6 +29,7 @@ interface MessageWithParts {
 }
 
 const sessionHistory = new Map<string, number[]>()
+const sessionStart = new Map<string, number>()
 
 function createPatternMatcher(patterns: string[]) {
   return (message: string): boolean => {
@@ -83,21 +84,17 @@ export async function createPlugin(context: PluginInput): Promise<Hooks> {
 
             history.push(nextIndex)
             sessionHistory.set(sessionID, history)
+            if (!sessionStart.has(sessionID)) sessionStart.set(sessionID, Date.now())
 
-            await logger.info("Rate limit detected, switching to next fallback", {
-              sessionID,
-              message: props.status.message,
-              fromIndex: currentIndex,
-              toIndex: nextIndex,
-              model: config.fallbackModels[nextIndex],
-            })
+            const reason = props.status.message.split("\n")[0].split(".")[0].substring(0, 80)
+            await logger.info(
+              `Rate limit hit: ${config.fallbackModels[currentIndex === -1 ? "?" : currentIndex]} → ${config.fallbackModels[nextIndex]}`,
+              { sessionID, reason }
+            )
 
             try {
-              await logger.info("Aborting session", { sessionID })
               await context.client.session.abort({ path: { id: sessionID } })
               await new Promise(resolve => setTimeout(resolve, 200))
-
-              await logger.info("Fetching messages", { sessionID })
               const messagesResponse = await context.client.session.messages({ path: { id: sessionID } })
               const messages = messagesResponse.data as MessageWithParts[] | undefined
 
@@ -112,21 +109,9 @@ export async function createPlugin(context: PluginInput): Promise<Hooks> {
                 return
               }
 
-              await logger.info("Found last user message", {
-                sessionID,
-                messageId: lastUserMessage.info.id,
-                totalMessages: messages.length,
-              })
-
-              await logger.info("Reverting session", { sessionID, messageId: lastUserMessage.info.id })
-              const revertResponse = await context.client.session.revert({
+              await context.client.session.revert({
                 path: { id: sessionID },
                 body: { messageID: lastUserMessage.info.id },
-              })
-              await logger.info("Revert completed", {
-                sessionID,
-                revertStatus: revertResponse.response?.status,
-                hasRevertState: !!(revertResponse.data as any)?.revert,
               })
               await new Promise(resolve => setTimeout(resolve, 500))
 
@@ -140,12 +125,6 @@ export async function createPlugin(context: PluginInput): Promise<Hooks> {
                 return
               }
 
-              await logger.info("Sending prompt with fallback model", {
-                sessionID,
-                model,
-                index: nextIndex,
-                partsCount: originalParts.length,
-              })
               await context.client.session.prompt({
                 path: { id: sessionID },
                 body: {
@@ -191,6 +170,7 @@ export async function createPlugin(context: PluginInput): Promise<Hooks> {
         const props = event.properties as { info?: { id?: string } }
         if (props.info?.id) {
           sessionHistory.delete(props.info.id)
+          sessionStart.delete(props.info.id)
           await logger.info("Session cleaned up", { sessionID: props.info.id })
         }
       }
@@ -200,7 +180,13 @@ export async function createPlugin(context: PluginInput): Promise<Hooks> {
       if (history && history.length > 0) {
         const lines = history.map(i => `[← Rate limit hit: switched to ${config.fallbackModels[i]}]`)
         output.text = lines.join("\n") + "\n" + output.text
+        const elapsed = Date.now() - (sessionStart.get(input.sessionID) ?? Date.now())
+        await logger.info(
+          `Fallback settled: ${config.fallbackModels[history[history.length - 1]]} (${history.length} fallbacks in ${elapsed}ms)`,
+          { sessionID: input.sessionID }
+        )
         sessionHistory.delete(input.sessionID)
+        sessionStart.delete(input.sessionID)
       }
     },
   }
