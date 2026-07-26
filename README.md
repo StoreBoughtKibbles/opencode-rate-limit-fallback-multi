@@ -99,7 +99,13 @@ When `logging: true`, logs are written to:
 ~/.local/share/opencode/logs/rate-limit-fallback.log
 ```
 
-Log entries include timestamps and details about rate limit detection, fallback attempts, and errors.
+Each fallback produces a compact entry, followed by a summary when the response arrives:
+
+```
+2026-07-24T23:27:15.815Z [INFO] Rate limit hit: opencode-go/deepseek-v4-flash → opencode/laguna-s-2.1-free {"reason":"weekly usage limit reached"}
+2026-07-24T23:27:16.828Z [INFO] Rate limit hit: opencode/laguna-s-2.1-free → opencode/deepseek-v4-flash-free {"reason":"Provider rate limit exceeded"}
+2026-07-24T23:27:28.062Z [INFO] Fallback settled: opencode/deepseek-v4-flash-free (2 fallbacks in 12647ms)
+```
 
 ## How It Works
 
@@ -111,7 +117,20 @@ Log entries include timestamps and details about rate limit detection, fallback 
 
 4. **Per-session tracking**: The plugin tracks which index each session is on. A new session starts from its original model and only enters the fallback chain if it hits a rate limit. Session state is cleaned up when the session is deleted.
 
-This approach keeps the conversation history clean — no "continue" messages or duplicates. The session seamlessly falls through the hierarchy.
+5. **Visual feedback**: When the response arrives, the fallback chain is displayed at the top of the AI's response:
+
+   ```
+   [← Rate limit hit: switched to opencode-go/deepseek-v4-flash]
+   [← Rate limit hit: switched to opencode/laguna-s-2.1-free]
+   [← Rate limit hit: switched to opencode/deepseek-v4-flash-free]
+   ```
+
+   A toast notification is also shown for immediate feedback.
+
+6. **Multi-channel logging**:
+   - **File log** (`~/.local/share/opencode/logs/rate-limit-fallback.log`): Detailed per-fallback and summary entries
+   - **App log** (`opencode app log`): Warn-level entries for fallback events
+   - **Toast**: Error toast in the TUI
 
 ## Local Development
 
