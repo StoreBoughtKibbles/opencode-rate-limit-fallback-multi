@@ -77,6 +77,11 @@ export async function createPlugin(context: PluginInput): Promise<Hooks> {
 
             if (nextIndex >= fallbackModels.length) {
               await logger.info("All fallbacks exhausted, no more models to try", { sessionID })
+              try {
+                await context.client.tui.showToast({
+                  body: { message: "All fallback models exhausted — no more models to try", variant: "error" },
+                })
+              } catch {}
               return
             }
 
@@ -89,8 +94,9 @@ export async function createPlugin(context: PluginInput): Promise<Hooks> {
             if (!sessionStart.has(sessionID)) sessionStart.set(sessionID, Date.now())
 
             const reason = props.status.message.split("\n")[0].split(".")[0].substring(0, 80)
+            const fromLabel = sessionIndex.has(sessionID) ? config.fallbackModels[currentIndex] : "?"
             await logger.info(
-              `Rate limit hit: ${config.fallbackModels[currentIndex === -1 ? "?" : currentIndex]} → ${config.fallbackModels[nextIndex]}`,
+              `Rate limit hit: ${fromLabel} → ${config.fallbackModels[nextIndex]}`,
               { sessionID, reason }
             )
 
