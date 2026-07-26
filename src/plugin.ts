@@ -28,7 +28,8 @@ interface MessageWithParts {
   parts: MessagePart[]
 }
 
-const sessionHistory = new Map<string, number[]>()
+const sessionIndex = new Map<string, number>()
+const sessionDisplayQueue = new Map<string, number[]>()
 const sessionStart = new Map<string, number>()
 
 function createPatternMatcher(patterns: string[]) {
@@ -71,8 +72,7 @@ export async function createPlugin(context: PluginInput): Promise<Hooks> {
         if (props.status.type === "retry" && props.status.message) {
           if (isRateLimitMessage(props.status.message)) {
             const sessionID = props.sessionID
-            const history = sessionHistory.get(sessionID) ?? []
-            const currentIndex = history.length > 0 ? history[history.length - 1] : -1
+            const currentIndex = sessionIndex.get(sessionID) ?? -1
             const nextIndex = currentIndex + 1
 
             if (nextIndex >= fallbackModels.length) {
@@ -82,8 +82,10 @@ export async function createPlugin(context: PluginInput): Promise<Hooks> {
 
             const model = fallbackModels[nextIndex]
 
-            history.push(nextIndex)
-            sessionHistory.set(sessionID, history)
+            sessionIndex.set(sessionID, nextIndex)
+            const queue = sessionDisplayQueue.get(sessionID) ?? []
+            queue.push(nextIndex)
+            sessionDisplayQueue.set(sessionID, queue)
             if (!sessionStart.has(sessionID)) sessionStart.set(sessionID, Date.now())
 
             const reason = props.status.message.split("\n")[0].split(".")[0].substring(0, 80)
@@ -169,23 +171,24 @@ export async function createPlugin(context: PluginInput): Promise<Hooks> {
       if (event.type === "session.deleted") {
         const props = event.properties as { info?: { id?: string } }
         if (props.info?.id) {
-          sessionHistory.delete(props.info.id)
+          sessionIndex.delete(props.info.id)
+          sessionDisplayQueue.delete(props.info.id)
           sessionStart.delete(props.info.id)
           await logger.info("Session cleaned up", { sessionID: props.info.id })
         }
       }
     },
     "experimental.text.complete": async (input, output) => {
-      const history = sessionHistory.get(input.sessionID)
-      if (history && history.length > 0) {
-        const lines = history.map(i => `[← Rate limit hit: switched to ${config.fallbackModels[i]}]`)
+      const queue = sessionDisplayQueue.get(input.sessionID)
+      if (queue && queue.length > 0) {
+        const lines = queue.map(i => `[← Rate limit hit: switched to ${config.fallbackModels[i]}]`)
         output.text = lines.join("\n") + "\n" + output.text
         const elapsed = Date.now() - (sessionStart.get(input.sessionID) ?? Date.now())
         await logger.info(
-          `Fallback settled: ${config.fallbackModels[history[history.length - 1]]} (${history.length} fallbacks in ${elapsed}ms)`,
+          `Fallback settled: ${config.fallbackModels[queue[queue.length - 1]]} (${queue.length} fallbacks in ${elapsed}ms)`,
           { sessionID: input.sessionID }
         )
-        sessionHistory.delete(input.sessionID)
+        sessionDisplayQueue.delete(input.sessionID)
         sessionStart.delete(input.sessionID)
       }
     },
