@@ -12,7 +12,6 @@ export type FallbackModel = string | FallbackModelObject
 export interface RateLimitFallbackConfig {
   enabled: boolean
   fallbackModels: FallbackModel[]
-  cooldownMs: number
   patterns: string[]
   logging: boolean
 }
@@ -20,7 +19,6 @@ export interface RateLimitFallbackConfig {
 interface RawConfig {
   enabled?: boolean
   fallbackModels?: FallbackModel[]
-  cooldownMs?: number
   patterns?: string[]
   logging?: boolean
 }
@@ -36,7 +34,6 @@ const DEFAULT_PATTERNS = [
 const DEFAULT_CONFIG: RateLimitFallbackConfig = {
   enabled: true,
   fallbackModels: [],
-  cooldownMs: 300000,
   patterns: DEFAULT_PATTERNS,
   logging: false,
 }
@@ -71,6 +68,35 @@ function findConfigFile(): string | null {
   return null
 }
 
+function isValidFallbackModel(m: unknown): m is FallbackModel {
+  if (typeof m === "string") return m.length > 0
+  if (typeof m === "object" && m !== null) {
+    const obj = m as Record<string, unknown>
+    return typeof obj.providerID === "string" && obj.providerID.length > 0
+      && typeof obj.modelID === "string" && obj.modelID.length > 0
+  }
+  return false
+}
+
+function validateConfig(raw: RawConfig): RateLimitFallbackConfig {
+  const config: RateLimitFallbackConfig = {
+    enabled: raw.enabled ?? DEFAULT_CONFIG.enabled,
+    fallbackModels: DEFAULT_CONFIG.fallbackModels,
+    patterns: DEFAULT_CONFIG.patterns,
+    logging: raw.logging ?? DEFAULT_CONFIG.logging,
+  }
+
+  if (Array.isArray(raw.fallbackModels)) {
+    config.fallbackModels = raw.fallbackModels.filter(isValidFallbackModel)
+  }
+
+  if (Array.isArray(raw.patterns)) {
+    config.patterns = raw.patterns.filter(p => typeof p === "string" && p.length > 0)
+  }
+
+  return config
+}
+
 export function parseModel(model: FallbackModel): FallbackModelObject {
   if (typeof model === "object") {
     return model
@@ -89,21 +115,14 @@ export function loadConfig(): RateLimitFallbackConfig {
   const configPath = findConfigFile()
 
   if (!configPath) {
-    return DEFAULT_CONFIG
+    return { ...DEFAULT_CONFIG }
   }
 
   try {
     const content = readFileSync(configPath, "utf-8")
     const userConfig = JSON.parse(content) as RawConfig
-
-    return {
-      enabled: userConfig.enabled ?? DEFAULT_CONFIG.enabled,
-      fallbackModels: userConfig.fallbackModels ?? DEFAULT_CONFIG.fallbackModels,
-      cooldownMs: userConfig.cooldownMs ?? DEFAULT_CONFIG.cooldownMs,
-      patterns: userConfig.patterns ?? DEFAULT_CONFIG.patterns,
-      logging: userConfig.logging ?? DEFAULT_CONFIG.logging,
-    }
+    return validateConfig(userConfig)
   } catch {
-    return DEFAULT_CONFIG
+    return { ...DEFAULT_CONFIG }
   }
 }
