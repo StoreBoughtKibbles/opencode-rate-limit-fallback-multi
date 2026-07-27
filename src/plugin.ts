@@ -1,5 +1,5 @@
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
-import { loadConfig, parseModel } from "./config"
+import { loadConfig, parseModel, type RateLimitFallbackConfig } from "./config"
 import { createLogger } from "./log"
 
 interface MessageInfo {
@@ -39,8 +39,8 @@ function createPatternMatcher(patterns: string[]) {
   }
 }
 
-export async function createPlugin(context: PluginInput): Promise<Hooks> {
-  const config = loadConfig()
+export async function createPlugin(context: PluginInput, configOverride?: RateLimitFallbackConfig): Promise<Hooks> {
+  const config = configOverride ?? loadConfig()
   const logger = createLogger(config.logging)
   const isRateLimitMessage = createPatternMatcher(config.patterns)
   const fallbackModels = config.fallbackModels.map(parseModel)
@@ -94,7 +94,7 @@ export async function createPlugin(context: PluginInput): Promise<Hooks> {
             if (!sessionStart.has(sessionID)) sessionStart.set(sessionID, Date.now())
 
             const reason = props.status.message.split("\n")[0].split(".")[0].substring(0, 80)
-            const fromLabel = sessionIndex.has(sessionID) ? config.fallbackModels[currentIndex] : "?"
+            const fromLabel = currentIndex < 0 ? "?" : config.fallbackModels[currentIndex]
             await logger.info(
               `Rate limit hit: ${fromLabel} → ${config.fallbackModels[nextIndex]}`,
               { sessionID, reason }
