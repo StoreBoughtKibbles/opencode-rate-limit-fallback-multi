@@ -1,5 +1,16 @@
 import { describe, expect, test, mock } from "bun:test"
 import { createPlugin } from "../src/plugin"
+import { type RateLimitFallbackConfig } from "../src/config"
+
+function testConfig(overrides?: Partial<RateLimitFallbackConfig>): RateLimitFallbackConfig {
+  return {
+    enabled: true,
+    fallbackModels: ["anthropic/claude-opus-4-5"],
+    patterns: ["rate limit", "usage limit", "too many requests"],
+    logging: false,
+    ...overrides,
+  }
+}
 
 describe("createPlugin", () => {
   const mockClient = () => {
@@ -36,7 +47,7 @@ describe("createPlugin", () => {
 
   test("ignores non-retry status events", async () => {
     const client = mockClient()
-    const hooks = await createPlugin(mockContext(client))
+    const hooks = await createPlugin(mockContext(client), testConfig())
 
     await hooks.event!({
       event: {
@@ -53,7 +64,7 @@ describe("createPlugin", () => {
 
   test("ignores retry messages that don't match rate limit patterns", async () => {
     const client = mockClient()
-    const hooks = await createPlugin(mockContext(client))
+    const hooks = await createPlugin(mockContext(client), testConfig())
 
     await hooks.event!({
       event: {
@@ -70,7 +81,7 @@ describe("createPlugin", () => {
 
   test("advances from -1 to 0 on first rate limit", async () => {
     const client = mockClient()
-    const hooks = await createPlugin(mockContext(client))
+    const hooks = await createPlugin(mockContext(client), testConfig())
 
     await hooks.event!({
       event: {
@@ -96,7 +107,7 @@ describe("createPlugin", () => {
 
   test("advances from 0 to exhaustion on second rate limit", async () => {
     const client = mockClient()
-    const hooks = await createPlugin(mockContext(client))
+    const hooks = await createPlugin(mockContext(client), testConfig())
 
     // First rate limit → moves to index 0
     await hooks.event!({
@@ -126,7 +137,7 @@ describe("createPlugin", () => {
 
   test("cleans up session state on session.deleted", async () => {
     const client = mockClient()
-    const hooks = await createPlugin(mockContext(client))
+    const hooks = await createPlugin(mockContext(client), testConfig())
 
     // Trigger a fallback to set session index
     await hooks.event!({
@@ -148,5 +159,71 @@ describe("createPlugin", () => {
     })
 
     // Session should be able to start fresh after deletion (no crash)
+  })
+
+  test("empty pattern is filtered out and does not match every retry", async () => {
+    const client = mockClient()
+    const hooks = await createPlugin(
+      mockContext(client),
+      testConfig({ patterns: [""] }),
+    )
+
+    await hooks.event!({
+      event: {
+        type: "session.status",
+        properties: {
+          sessionID: "sess-6",
+          status: { type: "retry", message: "anything at all" },
+        },
+      } as any,
+    })
+
+    expect(client.session.abort).not.toHaveBeenCalled()
+  })
+
+  test("invalid fallbackModels entries are filtered out", async () => {
+    const client = mockClient()
+    const hooks = await createPlugin(
+      mockContext(client),
+      testConfig({ fallbackModels: [null as any, "", "valid/model"] }),
+    )
+
+    await hooks.event!({
+      event: {
+        type: "session.status",
+        properties: {
+          sessionID: "sess-7",
+          status: { type: "retry", message: "rate limit" },
+        },
+      } as any,
+    })
+
+    expect(client.session.prompt).toHaveBeenCalledWith({
+      path: { id: "sess-7" },
+      body: {
+        model: { providerID: "valid", modelID: "model" },
+        parts: [{ type: "text", text: "hello" }],
+      },
+    })
+  })
+
+  test("non-array fallbackModels falls back to empty (exhaustion)", async () => {
+    const client = mockClient()
+    const hooks = await createPlugin(
+      mockContext(client),
+      testConfig({ fallbackModels: undefined as any }),
+    )
+
+    await hooks.event!({
+      event: {
+        type: "session.status",
+        properties: {
+          sessionID: "sess-8",
+          status: { type: "retry", message: "rate limit" },
+        },
+      } as any,
+    })
+
+    expect(client.session.abort).not.toHaveBeenCalled()
   })
 })
