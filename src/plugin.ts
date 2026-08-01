@@ -87,12 +87,6 @@ export async function createPlugin(context: PluginInput, configOverride?: RateLi
 
             const model = fallbackModels[nextIndex]
 
-            sessionIndex.set(sessionID, nextIndex)
-            const queue = sessionDisplayQueue.get(sessionID) ?? []
-            queue.push(nextIndex)
-            sessionDisplayQueue.set(sessionID, queue)
-            if (!sessionStart.has(sessionID)) sessionStart.set(sessionID, Date.now())
-
             const reason = props.status.message.split("\n")[0].split(".")[0].substring(0, 80)
             const fromLabel = currentIndex < 0 ? "?" : config.fallbackModels[currentIndex]
             await logger.info(
@@ -117,12 +111,6 @@ export async function createPlugin(context: PluginInput, configOverride?: RateLi
                 return
               }
 
-              await context.client.session.revert({
-                path: { id: sessionID },
-                body: { messageID: lastUserMessage.info.id },
-              })
-              await new Promise(resolve => setTimeout(resolve, 500))
-
               const originalParts = lastUserMessage.parts
                 .filter(p => !isSyntheticPart(p))
                 .map(p => convertToPromptPart(p))
@@ -133,6 +121,12 @@ export async function createPlugin(context: PluginInput, configOverride?: RateLi
                 return
               }
 
+              await context.client.session.revert({
+                path: { id: sessionID },
+                body: { messageID: lastUserMessage.info.id },
+              })
+              await new Promise(resolve => setTimeout(resolve, 500))
+
               await context.client.session.prompt({
                 path: { id: sessionID },
                 body: {
@@ -141,6 +135,13 @@ export async function createPlugin(context: PluginInput, configOverride?: RateLi
                   parts: originalParts,
                 },
               })
+
+              sessionIndex.set(sessionID, nextIndex)
+              const queue = sessionDisplayQueue.get(sessionID) ?? []
+              queue.push(nextIndex)
+              sessionDisplayQueue.set(sessionID, queue)
+              if (!sessionStart.has(sessionID)) sessionStart.set(sessionID, Date.now())
+
               await logger.info("Fallback prompt sent successfully", { sessionID, index: nextIndex })
 
               // Multi-channel notification

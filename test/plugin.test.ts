@@ -95,7 +95,8 @@ describe("createPlugin", () => {
 
     expect(client.session.abort).toHaveBeenCalledWith({ path: { id: "sess-3" } })
     expect(client.session.messages).toHaveBeenCalledWith({ path: { id: "sess-3" } })
-    expect(client.session.revert).toHaveBeenCalled()
+    expect(client.session.revert).toHaveBeenCalledTimes(1)
+    expect(client.session.prompt).toHaveBeenCalledTimes(1)
     expect(client.session.prompt).toHaveBeenCalledWith({
       path: { id: "sess-3" },
       body: {
@@ -159,6 +160,81 @@ describe("createPlugin", () => {
     })
 
     // Session should be able to start fresh after deletion (no crash)
+  })
+
+  test("does not revert a user message with no replayable parts", async () => {
+    const client = mockClient()
+    client.session.messages.mockResolvedValueOnce({
+      data: [
+        {
+          info: { id: "msg1", role: "user", sessionID: "sess-10" },
+          parts: [{ id: "p1", type: "tool" }],
+        },
+      ],
+    } as any)
+    const hooks = await createPlugin(mockContext(client), testConfig())
+
+    await hooks.event!({
+      event: {
+        type: "session.status",
+        properties: {
+          sessionID: "sess-10",
+          status: { type: "retry", message: "rate limit exceeded" },
+        },
+      } as any,
+    })
+
+    expect(client.session.abort).toHaveBeenCalled()
+    expect(client.session.revert).not.toHaveBeenCalled()
+    expect(client.session.prompt).not.toHaveBeenCalled()
+  })
+
+  test("failed prompt does not consume a model index", async () => {
+    const client = mockClient()
+    client.session.prompt.mockRejectedValueOnce(new Error("network error"))
+    const hooks = await createPlugin(mockContext(client), testConfig())
+
+    const retry = async () => {
+      await hooks.event!({
+        event: {
+          type: "session.status",
+          properties: {
+            sessionID: "sess-11",
+            status: { type: "retry", message: "rate limit exceeded" },
+          },
+        } as any,
+      })
+    }
+
+    await retry()
+    await retry()
+
+    expect(client.session.prompt.mock.calls.length).toBe(2)
+    expect(client.session.prompt.mock.calls[0][0].body.model).toEqual({
+      providerID: "anthropic",
+      modelID: "claude-opus-4-5",
+    })
+  })
+
+  test("failed fallback does not leave a false completion marker", async () => {
+    const client = mockClient()
+    client.session.prompt.mockRejectedValueOnce(new Error("network error"))
+    const hooks = await createPlugin(mockContext(client), testConfig())
+
+    await hooks.event!({
+      event: {
+        type: "session.status",
+        properties: {
+          sessionID: "sess-12",
+          status: { type: "retry", message: "rate limit exceeded" },
+        },
+      } as any,
+    })
+
+    const output: any = { text: "original response" }
+    await hooks["experimental.text.complete"]!({ sessionID: "sess-12" } as any, output)
+
+    expect(output.text).toBe("original response")
   })
 
   test("empty pattern is filtered out and does not match every retry", async () => {
