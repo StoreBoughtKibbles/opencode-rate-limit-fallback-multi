@@ -29,6 +29,13 @@ const DEFAULT_PATTERNS = [
   "too many requests",
   "quota exceeded",
   "overloaded",
+  "cannot connect to api",
+  "socket connection was closed unexpectedly",
+  "socket hang up",
+  "econnreset",
+  "fetch failed",
+  "connection refused",
+  "network error",
 ]
 
 const DEFAULT_CONFIG: RateLimitFallbackConfig = {
