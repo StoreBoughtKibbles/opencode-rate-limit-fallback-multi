@@ -16,7 +16,7 @@ export interface RateLimitFallbackConfig {
   logging: boolean
 }
 
-interface RawConfig {
+export interface RawConfig {
   enabled?: boolean
   fallbackModels?: FallbackModel[]
   patterns?: string[]
@@ -85,7 +85,7 @@ function isValidFallbackModel(m: unknown): m is FallbackModel {
   return false
 }
 
-function validateConfig(raw: RawConfig): RateLimitFallbackConfig {
+export function validateConfig(raw: RawConfig): RateLimitFallbackConfig {
   const config: RateLimitFallbackConfig = {
     enabled: raw.enabled ?? DEFAULT_CONFIG.enabled,
     fallbackModels: DEFAULT_CONFIG.fallbackModels,

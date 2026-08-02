@@ -1,5 +1,5 @@
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
-import { loadConfig, parseModel, type RateLimitFallbackConfig } from "./config"
+import { loadConfig, parseModel, validateConfig, type RateLimitFallbackConfig } from "./config"
 import { createLogger } from "./log"
 
 interface MessageInfo {
@@ -40,7 +40,7 @@ function createPatternMatcher(patterns: string[]) {
 }
 
 export async function createPlugin(context: PluginInput, configOverride?: RateLimitFallbackConfig): Promise<Hooks> {
-  const config = configOverride ?? loadConfig()
+  const config = validateConfig(configOverride ?? loadConfig())
   const logger = createLogger(config.logging)
   const isRateLimitMessage = createPatternMatcher(config.patterns)
   const fallbackModels = config.fallbackModels.map(parseModel)
