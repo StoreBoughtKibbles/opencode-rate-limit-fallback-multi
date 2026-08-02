@@ -31,6 +31,7 @@ interface MessageWithParts {
 const sessionIndex = new Map<string, number>()
 const sessionDisplayQueue = new Map<string, number[]>()
 const sessionStart = new Map<string, number>()
+const sessionInflight = new Map<string, object>()
 
 function createPatternMatcher(patterns: string[]) {
   return (message: string): boolean => {
@@ -72,6 +73,12 @@ export async function createPlugin(context: PluginInput, configOverride?: RateLi
         if (props.status.type === "retry" && props.status.message) {
           if (isRateLimitMessage(props.status.message)) {
             const sessionID = props.sessionID
+
+            if (sessionInflight.has(sessionID)) {
+              await logger.info("Fallback already in progress, ignoring retry", { sessionID })
+              return
+            }
+
             const currentIndex = sessionIndex.get(sessionID) ?? -1
             const nextIndex = currentIndex + 1
 
@@ -86,6 +93,8 @@ export async function createPlugin(context: PluginInput, configOverride?: RateLi
             }
 
             const model = fallbackModels[nextIndex]
+            const token = {}
+            sessionInflight.set(sessionID, token)
 
             const reason = props.status.message.split("\n")[0].split(".")[0].substring(0, 80)
             const fromLabel = currentIndex < 0 ? "?" : config.fallbackModels[currentIndex]
@@ -170,6 +179,10 @@ export async function createPlugin(context: PluginInput, configOverride?: RateLi
                 sessionID,
                 error: err instanceof Error ? err.message : String(err),
               })
+            } finally {
+              if (sessionInflight.get(sessionID) === token) {
+                sessionInflight.delete(sessionID)
+              }
             }
           }
         }
@@ -181,6 +194,7 @@ export async function createPlugin(context: PluginInput, configOverride?: RateLi
           sessionIndex.delete(props.info.id)
           sessionDisplayQueue.delete(props.info.id)
           sessionStart.delete(props.info.id)
+          sessionInflight.delete(props.info.id)
           await logger.info("Session cleaned up", { sessionID: props.info.id })
         }
       }

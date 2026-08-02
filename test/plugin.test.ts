@@ -257,6 +257,71 @@ describe("createPlugin", () => {
     expect(output.text).toBe("original response")
   })
 
+  test("coalesces overlapping retry events for the same session", async () => {
+    const client = mockClient()
+    const hooks = await createPlugin(mockContext(client), testConfig())
+
+    const first = hooks.event!({
+      event: {
+        type: "session.status",
+        properties: {
+          sessionID: "sess-13",
+          status: { type: "retry", message: "rate limit exceeded" },
+        },
+      } as any,
+    })
+
+    await new Promise(resolve => setTimeout(resolve, 50))
+
+    // Second matching retry arrives while the first workflow is in flight
+    await hooks.event!({
+      event: {
+        type: "session.status",
+        properties: {
+          sessionID: "sess-13",
+          status: { type: "retry", message: "rate limit exceeded again" },
+        },
+      } as any,
+    })
+
+    await first
+
+    expect(client.session.abort).toHaveBeenCalledTimes(1)
+    expect(client.session.messages).toHaveBeenCalledTimes(1)
+    expect(client.session.revert).toHaveBeenCalledTimes(1)
+    expect(client.session.prompt).toHaveBeenCalledTimes(1)
+  })
+
+  test("a retry after a completed fallback advances to the next model", async () => {
+    const client = mockClient()
+    const hooks = await createPlugin(
+      mockContext(client),
+      testConfig({
+        fallbackModels: ["anthropic/claude-opus-4-5", "anthropic/claude-sonnet-4-5"],
+      }),
+    )
+
+    for (const message of ["rate limit exceeded", "rate limit exceeded again"]) {
+      await hooks.event!({
+        event: {
+          type: "session.status",
+          properties: {
+            sessionID: "sess-14",
+            status: { type: "retry", message },
+          },
+        } as any,
+      })
+    }
+
+    expect(client.session.abort).toHaveBeenCalledTimes(2)
+    expect(client.session.revert).toHaveBeenCalledTimes(2)
+    expect(client.session.prompt).toHaveBeenCalledTimes(2)
+    expect(client.session.prompt.mock.calls[1][0].body.model).toEqual({
+      providerID: "anthropic",
+      modelID: "claude-sonnet-4-5",
+    })
+  })
+
   test("empty pattern is filtered out and does not match every retry", async () => {
     const client = mockClient()
     const hooks = await createPlugin(
