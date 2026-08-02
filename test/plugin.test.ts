@@ -140,7 +140,7 @@ describe("createPlugin", () => {
     const client = mockClient()
     const hooks = await createPlugin(mockContext(client), testConfig())
 
-    // Trigger a fallback to set session index
+    // Trigger a fallback to set session index and display queue
     await hooks.event!({
       event: {
         type: "session.status",
@@ -159,7 +159,27 @@ describe("createPlugin", () => {
       } as any,
     })
 
-    // Session should be able to start fresh after deletion (no crash)
+    // Stale display queue must be cleared: no completion marker
+    const output: any = { text: "original response" }
+    await hooks["experimental.text.complete"]!({ sessionID: "sess-5" } as any, output)
+    expect(output.text).toBe("original response")
+
+    // Stale index must be cleared: a new retry starts at index 0, not exhaustion
+    await hooks.event!({
+      event: {
+        type: "session.status",
+        properties: {
+          sessionID: "sess-5",
+          status: { type: "retry", message: "rate limit" },
+        },
+      } as any,
+    })
+
+    expect(client.session.prompt).toHaveBeenCalledTimes(2)
+    expect(client.session.prompt.mock.calls[1][0].body.model).toEqual({
+      providerID: "anthropic",
+      modelID: "claude-opus-4-5",
+    })
   })
 
   test("does not revert a user message with no replayable parts", async () => {
