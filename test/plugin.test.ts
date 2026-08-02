@@ -45,6 +45,17 @@ describe("createPlugin", () => {
     $: {} as any,
   })
 
+  type Hooks = Awaited<ReturnType<typeof createPlugin>>
+
+  function fireRetry(hooks: Hooks, sessionID: string, message: string): Promise<void> {
+    return hooks.event!({
+      event: {
+        type: "session.status",
+        properties: { sessionID, status: { type: "retry", message } },
+      } as any,
+    })
+  }
+
   test("ignores non-retry status events", async () => {
     const client = mockClient()
     const hooks = await createPlugin(mockContext(client), testConfig())
@@ -66,15 +77,7 @@ describe("createPlugin", () => {
     const client = mockClient()
     const hooks = await createPlugin(mockContext(client), testConfig())
 
-    await hooks.event!({
-      event: {
-        type: "session.status",
-        properties: {
-          sessionID: "sess-2",
-          status: { type: "retry", message: "connection timeout" },
-        },
-      } as any,
-    })
+    await fireRetry(hooks, "sess-2", "connection timeout")
 
     expect(client.session.abort).not.toHaveBeenCalled()
   })
@@ -83,15 +86,7 @@ describe("createPlugin", () => {
     const client = mockClient()
     const hooks = await createPlugin(mockContext(client), testConfig())
 
-    await hooks.event!({
-      event: {
-        type: "session.status",
-        properties: {
-          sessionID: "sess-3",
-          status: { type: "retry", message: "rate limit exceeded" },
-        },
-      } as any,
-    })
+    await fireRetry(hooks, "sess-3", "rate limit exceeded")
 
     expect(client.session.abort).toHaveBeenCalledWith({ path: { id: "sess-3" } })
     expect(client.session.messages).toHaveBeenCalledWith({ path: { id: "sess-3" } })
@@ -111,27 +106,11 @@ describe("createPlugin", () => {
     const hooks = await createPlugin(mockContext(client), testConfig())
 
     // First rate limit → moves to index 0
-    await hooks.event!({
-      event: {
-        type: "session.status",
-        properties: {
-          sessionID: "sess-4",
-          status: { type: "retry", message: "rate limit exceeded" },
-        },
-      } as any,
-    })
+    await fireRetry(hooks, "sess-4", "rate limit exceeded")
 
     // Second rate limit → tries index 1, but default config has 1 model → exhausted
     const promptCount = client.session.prompt.mock.calls.length
-    await hooks.event!({
-      event: {
-        type: "session.status",
-        properties: {
-          sessionID: "sess-4",
-          status: { type: "retry", message: "rate limit exceeded again" },
-        },
-      } as any,
-    })
+    await fireRetry(hooks, "sess-4", "rate limit exceeded again")
 
     expect(client.session.prompt.mock.calls.length).toBe(promptCount)
   })
@@ -141,15 +120,7 @@ describe("createPlugin", () => {
     const hooks = await createPlugin(mockContext(client), testConfig())
 
     // Trigger a fallback to set session index and display queue
-    await hooks.event!({
-      event: {
-        type: "session.status",
-        properties: {
-          sessionID: "sess-5",
-          status: { type: "retry", message: "rate limit" },
-        },
-      } as any,
-    })
+    await fireRetry(hooks, "sess-5", "rate limit")
 
     // Delete the session
     await hooks.event!({
@@ -165,15 +136,7 @@ describe("createPlugin", () => {
     expect(output.text).toBe("original response")
 
     // Stale index must be cleared: a new retry starts at index 0, not exhaustion
-    await hooks.event!({
-      event: {
-        type: "session.status",
-        properties: {
-          sessionID: "sess-5",
-          status: { type: "retry", message: "rate limit" },
-        },
-      } as any,
-    })
+    await fireRetry(hooks, "sess-5", "rate limit")
 
     expect(client.session.prompt).toHaveBeenCalledTimes(2)
     expect(client.session.prompt.mock.calls[1][0].body.model).toEqual({
@@ -194,15 +157,7 @@ describe("createPlugin", () => {
     } as any)
     const hooks = await createPlugin(mockContext(client), testConfig())
 
-    await hooks.event!({
-      event: {
-        type: "session.status",
-        properties: {
-          sessionID: "sess-10",
-          status: { type: "retry", message: "rate limit exceeded" },
-        },
-      } as any,
-    })
+    await fireRetry(hooks, "sess-10", "rate limit exceeded")
 
     expect(client.session.abort).toHaveBeenCalled()
     expect(client.session.revert).not.toHaveBeenCalled()
@@ -214,20 +169,8 @@ describe("createPlugin", () => {
     client.session.prompt.mockRejectedValueOnce(new Error("network error"))
     const hooks = await createPlugin(mockContext(client), testConfig())
 
-    const retry = async () => {
-      await hooks.event!({
-        event: {
-          type: "session.status",
-          properties: {
-            sessionID: "sess-11",
-            status: { type: "retry", message: "rate limit exceeded" },
-          },
-        } as any,
-      })
-    }
-
-    await retry()
-    await retry()
+    await fireRetry(hooks, "sess-11", "rate limit exceeded")
+    await fireRetry(hooks, "sess-11", "rate limit exceeded")
 
     expect(client.session.prompt.mock.calls.length).toBe(2)
     expect(client.session.prompt.mock.calls[0][0].body.model).toEqual({
@@ -241,15 +184,7 @@ describe("createPlugin", () => {
     client.session.prompt.mockRejectedValueOnce(new Error("network error"))
     const hooks = await createPlugin(mockContext(client), testConfig())
 
-    await hooks.event!({
-      event: {
-        type: "session.status",
-        properties: {
-          sessionID: "sess-12",
-          status: { type: "retry", message: "rate limit exceeded" },
-        },
-      } as any,
-    })
+    await fireRetry(hooks, "sess-12", "rate limit exceeded")
 
     const output: any = { text: "original response" }
     await hooks["experimental.text.complete"]!({ sessionID: "sess-12" } as any, output)
@@ -261,28 +196,12 @@ describe("createPlugin", () => {
     const client = mockClient()
     const hooks = await createPlugin(mockContext(client), testConfig())
 
-    const first = hooks.event!({
-      event: {
-        type: "session.status",
-        properties: {
-          sessionID: "sess-13",
-          status: { type: "retry", message: "rate limit exceeded" },
-        },
-      } as any,
-    })
+    const first = fireRetry(hooks, "sess-13", "rate limit exceeded")
 
     await new Promise(resolve => setTimeout(resolve, 50))
 
     // Second matching retry arrives while the first workflow is in flight
-    await hooks.event!({
-      event: {
-        type: "session.status",
-        properties: {
-          sessionID: "sess-13",
-          status: { type: "retry", message: "rate limit exceeded again" },
-        },
-      } as any,
-    })
+    await fireRetry(hooks, "sess-13", "rate limit exceeded again")
 
     await first
 
@@ -302,15 +221,7 @@ describe("createPlugin", () => {
     )
 
     for (const message of ["rate limit exceeded", "rate limit exceeded again"]) {
-      await hooks.event!({
-        event: {
-          type: "session.status",
-          properties: {
-            sessionID: "sess-14",
-            status: { type: "retry", message },
-          },
-        } as any,
-      })
+      await fireRetry(hooks, "sess-14", message)
     }
 
     expect(client.session.abort).toHaveBeenCalledTimes(2)
@@ -329,15 +240,7 @@ describe("createPlugin", () => {
       testConfig({ patterns: [""] }),
     )
 
-    await hooks.event!({
-      event: {
-        type: "session.status",
-        properties: {
-          sessionID: "sess-6",
-          status: { type: "retry", message: "anything at all" },
-        },
-      } as any,
-    })
+    await fireRetry(hooks, "sess-6", "anything at all")
 
     expect(client.session.abort).not.toHaveBeenCalled()
   })
@@ -349,15 +252,7 @@ describe("createPlugin", () => {
       testConfig({ fallbackModels: [null as any, "", "valid/model"] }),
     )
 
-    await hooks.event!({
-      event: {
-        type: "session.status",
-        properties: {
-          sessionID: "sess-7",
-          status: { type: "retry", message: "rate limit" },
-        },
-      } as any,
-    })
+    await fireRetry(hooks, "sess-7", "rate limit")
 
     expect(client.session.prompt).toHaveBeenCalledWith({
       path: { id: "sess-7" },
@@ -375,15 +270,7 @@ describe("createPlugin", () => {
       testConfig({ fallbackModels: undefined as any }),
     )
 
-    await hooks.event!({
-      event: {
-        type: "session.status",
-        properties: {
-          sessionID: "sess-8",
-          status: { type: "retry", message: "rate limit" },
-        },
-      } as any,
-    })
+    await fireRetry(hooks, "sess-8", "rate limit")
 
     expect(client.session.abort).not.toHaveBeenCalled()
   })
