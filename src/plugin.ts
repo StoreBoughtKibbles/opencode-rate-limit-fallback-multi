@@ -29,8 +29,7 @@ interface MessageWithParts {
 }
 
 const sessionIndex = new Map<string, number>()
-const sessionDisplayQueue = new Map<string, number[]>()
-const sessionStart = new Map<string, number>()
+const sessionFallback = new Map<string, { queue: number[]; start: number }>()
 const sessionInflight = new Map<string, object>()
 
 function createPatternMatcher(patterns: string[]) {
@@ -38,6 +37,10 @@ function createPatternMatcher(patterns: string[]) {
     const lower = message.toLowerCase()
     return patterns.some(pattern => lower.includes(pattern.toLowerCase()))
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 export async function createPlugin(context: PluginInput, configOverride?: RateLimitFallbackConfig): Promise<Hooks> {
@@ -105,7 +108,7 @@ export async function createPlugin(context: PluginInput, configOverride?: RateLi
 
             try {
               await context.client.session.abort({ path: { id: sessionID } })
-              await new Promise(resolve => setTimeout(resolve, 200))
+              await sleep(200)
               const messagesResponse = await context.client.session.messages({ path: { id: sessionID } })
               const messages = messagesResponse.data as MessageWithParts[] | undefined
 
@@ -134,7 +137,7 @@ export async function createPlugin(context: PluginInput, configOverride?: RateLi
                 path: { id: sessionID },
                 body: { messageID: lastUserMessage.info.id },
               })
-              await new Promise(resolve => setTimeout(resolve, 500))
+              await sleep(500)
 
               await context.client.session.prompt({
                 path: { id: sessionID },
@@ -146,10 +149,12 @@ export async function createPlugin(context: PluginInput, configOverride?: RateLi
               })
 
               sessionIndex.set(sessionID, nextIndex)
-              const queue = sessionDisplayQueue.get(sessionID) ?? []
-              queue.push(nextIndex)
-              sessionDisplayQueue.set(sessionID, queue)
-              if (!sessionStart.has(sessionID)) sessionStart.set(sessionID, Date.now())
+              let state = sessionFallback.get(sessionID)
+              if (!state) {
+                state = { queue: [], start: Date.now() }
+                sessionFallback.set(sessionID, state)
+              }
+              state.queue.push(nextIndex)
 
               await logger.info("Fallback prompt sent successfully", { sessionID, index: nextIndex })
 
@@ -192,25 +197,23 @@ export async function createPlugin(context: PluginInput, configOverride?: RateLi
         const props = event.properties as { info?: { id?: string } }
         if (props.info?.id) {
           sessionIndex.delete(props.info.id)
-          sessionDisplayQueue.delete(props.info.id)
-          sessionStart.delete(props.info.id)
+          sessionFallback.delete(props.info.id)
           sessionInflight.delete(props.info.id)
           await logger.info("Session cleaned up", { sessionID: props.info.id })
         }
       }
     },
     "experimental.text.complete": async (input, output) => {
-      const queue = sessionDisplayQueue.get(input.sessionID)
-      if (queue && queue.length > 0) {
-        const lines = queue.map(i => `[← Rate limit hit: switched to ${config.fallbackModels[i]}]`)
+      const state = sessionFallback.get(input.sessionID)
+      if (state && state.queue.length > 0) {
+        const lines = state.queue.map(i => `[← Rate limit hit: switched to ${config.fallbackModels[i]}]`)
         output.text = lines.join("\n") + "\n" + output.text
-        const elapsed = Date.now() - (sessionStart.get(input.sessionID) ?? Date.now())
+        const elapsed = Date.now() - state.start
         await logger.info(
-          `Fallback settled: ${config.fallbackModels[queue[queue.length - 1]]} (${queue.length} fallbacks in ${elapsed}ms)`,
+          `Fallback settled: ${config.fallbackModels[state.queue[state.queue.length - 1]]} (${state.queue.length} fallbacks in ${elapsed}ms)`,
           { sessionID: input.sessionID }
         )
-        sessionDisplayQueue.delete(input.sessionID)
-        sessionStart.delete(input.sessionID)
+        sessionFallback.delete(input.sessionID)
       }
     },
   }
