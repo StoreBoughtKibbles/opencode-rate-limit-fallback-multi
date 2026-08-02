@@ -31,13 +31,14 @@ export async function log(
   await appendFile(LOG_FILE, line).catch(() => {})
 }
 
+type LogFn = (message: string, extra?: Record<string, unknown>) => Promise<void>
+
+const noop: LogFn = async () => {}
+
 export function createLogger(enabled: boolean) {
-  return {
-    info: (message: string, extra?: Record<string, unknown>) =>
-      enabled ? log("INFO", message, extra) : Promise.resolve(),
-    warn: (message: string, extra?: Record<string, unknown>) =>
-      enabled ? log("WARN", message, extra) : Promise.resolve(),
-    error: (message: string, extra?: Record<string, unknown>) =>
-      enabled ? log("ERROR", message, extra) : Promise.resolve(),
+  if (!enabled) {
+    return { info: noop, warn: noop, error: noop }
   }
+  const logAt = (level: Level): LogFn => (message, extra) => log(level, message, extra)
+  return { info: logAt("INFO"), warn: logAt("WARN"), error: logAt("ERROR") }
 }
